@@ -321,9 +321,8 @@ async function convertLongMP3(startedAt, W, H){
   }
   if(!videoCodec) throw new Error("このブラウザで使える H.264 エンコーダーが見つかりませんでした。");
   let encodeError=null;
-  let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="", videoMuxOk=0, videoMuxError="";
   const videoEncoder=new VideoEncoder({
-    output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
+    output: (chunk, meta)=>{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); },
     error: (e)=>{ encodeError=e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
   videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: fps, hardwareAcceleration: "prefer-software"});
@@ -369,32 +368,19 @@ async function convertLongMP3(startedAt, W, H){
     // 中身が消えることがある（数日開きっぱなしのタブで発生）。
     // 映像エンコードの直前に画像を描き直す。
     drawFrame();
-    log("画像をキャンバスに描き直しました。");
-    // 診断：キャンバス自体に画像が描けているか、中心のピクセル色で確認する
-    try{
-      const ctx2=canvas.getContext("2d");
-      const px=ctx2.getImageData(Math.floor(canvas.width/2), Math.floor(canvas.height/2), 1, 1).data;
-      log("診断：img="+(img?("読込済み "+img.naturalWidth+"x"+img.naturalHeight+" complete="+img.complete):"なし")+" / キャンバス中心の色 RGB("+px[0]+","+px[1]+","+px[2]+")");
-    }catch(e){ log("診断：ピクセル確認できませんでした（"+e.message+"）"); }
-    // 診断でキャンバス自体は正しい（中心が白っぽい）ことが分かったので、
-    // 問題は VideoFrame(canvas) が隠れたキャンバスから黒い画像を
-    // 取り込む側にある。キャンバスからビットマップのスナップショットを
+    // キャンバスからビットマップのスナップショットを作り、そこから VideoFrame を作る。
     // 作り、そこから VideoFrame を作る。
     const bitmap=await createImageBitmap(canvas);
-    log("映像用のビットマップを作成しました。");
     for(let i=0;i<totalFrames && !encodeError;i++){
       const frame=new VideoFrame(bitmap, {timestamp: i*frameDurationUs, displayWidth: W, displayHeight: H});
       videoEncoder.encode(frame, {keyFrame: i===0});
-      // WebMはできたのにMP4だけ真っ黒になる原因として、フレームを
-      // 閉じるのが早すぎてエンコーダーが画像を読み取る前に消えて
-      // しまう疑いがある。キューが空になるまで待ってから閉じる。
+      // エンコーダーがフレームを処理し終わるまで待ってから閉じる。
       while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
       frame.close();
       progressEl.value=40+Math.round(i/totalFrames*55);
     }
     if(encodeError) throw encodeError;
     await videoEncoder.flush();
-    log("診断：映像チャンク "+videoChunkCount+"個、合計 "+videoChunkBytes+"バイト、最初 "+firstVideoChunkBytes+"バイト（"+firstVideoChunkType+"） / muxerに入った映像 "+videoMuxOk+"個、エラー="+(videoMuxError||"なし"));
     bitmap.close();
     muxer.finalize();
     const out=muxer.target.buffer;
@@ -508,9 +494,8 @@ makeBtn.addEventListener("click", async ()=>{
     }
     if(!videoCodec) throw new Error("このブラウザで使える H.264 エンコーダーが見つかりませんでした。");
 
-    let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="", videoMuxOk=0, videoMuxError="";
     videoEncoder = new VideoEncoder({
-      output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
+      output: (chunk, meta)=>{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); },
       error: (e)=>{ encodeError = e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
     videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: FPS, hardwareAcceleration: "prefer-software"});
@@ -558,14 +543,12 @@ makeBtn.addEventListener("click", async ()=>{
     for(let i=0; i<totalFrames && !encodeError; i++){
       const frame = new VideoFrame(canvas, {timestamp: i*frameDurationUs});
       videoEncoder.encode(frame, {keyFrame: i===0});
-      // フレームを閉じるのが早すぎるとエンコーダーが黒い画像を
-      // 読み取ることがあるため、キューが空になるまで待ってから閉じる。
+      // エンコーダーがフレームを処理し終わるまで待ってから閉じる。
       while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
       frame.close();
       progressEl.value = 40 + Math.round(i/totalFrames*55);
     }
     await videoEncoder.flush();
-    log("診断：映像チャンク "+videoChunkCount+"個、合計 "+videoChunkBytes+"バイト、最初 "+firstVideoChunkBytes+"バイト（"+firstVideoChunkType+"） / muxerに入った映像 "+videoMuxOk+"個、エラー="+(videoMuxError||"なし"));
     if(encodeError) throw encodeError;
     log("映像エンコード完了。MP4にまとめています…");
     muxer.finalize();
