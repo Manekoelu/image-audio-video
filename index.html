@@ -321,11 +321,12 @@ async function convertLongMP3(startedAt, W, H){
   }
   if(!videoCodec) throw new Error("このブラウザで使える H.264 エンコーダーが見つかりませんでした。");
   let encodeError=null;
+  let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="";
   const videoEncoder=new VideoEncoder({
-    output: (chunk, meta)=>{ muxer.addVideoChunk(chunk, meta); },
+    output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; } muxer.addVideoChunk(chunk, meta); },
     error: (e)=>{ encodeError=e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
-  videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: fps});
+  videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: fps, hardwareAcceleration: "prefer-software"});
   let decodedCount=0, encodedAudioCount=0;
   const audioEncoder=new AudioEncoder({
     output: (chunk, meta)=>{ encodedAudioCount++; muxer.addAudioChunk(chunk, meta); },
@@ -393,6 +394,7 @@ async function convertLongMP3(startedAt, W, H){
     }
     if(encodeError) throw encodeError;
     await videoEncoder.flush();
+    log("診断：映像チャンク "+videoChunkCount+"個、合計 "+videoChunkBytes+"バイト、最初 "+firstVideoChunkBytes+"バイト（"+firstVideoChunkType+"）");
     bitmap.close();
     muxer.finalize();
     const out=muxer.target.buffer;
@@ -506,11 +508,12 @@ makeBtn.addEventListener("click", async ()=>{
     }
     if(!videoCodec) throw new Error("このブラウザで使える H.264 エンコーダーが見つかりませんでした。");
 
+    let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="";
     videoEncoder = new VideoEncoder({
-      output: (chunk, meta)=>{ muxer.addVideoChunk(chunk, meta); },
+      output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; } muxer.addVideoChunk(chunk, meta); },
       error: (e)=>{ encodeError = e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
-    videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: FPS});
+    videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: FPS, hardwareAcceleration: "prefer-software"});
     log("映像エンコーダー設定完了："+videoCodec+"、"+W+"×"+H+"、"+totalFrames+"フレーム。");
 
     audioEncoder = new AudioEncoder({
@@ -562,6 +565,7 @@ makeBtn.addEventListener("click", async ()=>{
       progressEl.value = 40 + Math.round(i/totalFrames*55);
     }
     await videoEncoder.flush();
+    log("診断：映像チャンク "+videoChunkCount+"個、合計 "+videoChunkBytes+"バイト、最初 "+firstVideoChunkBytes+"バイト（"+firstVideoChunkType+"）");
     if(encodeError) throw encodeError;
     log("映像エンコード完了。MP4にまとめています…");
     muxer.finalize();
