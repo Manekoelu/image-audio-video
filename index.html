@@ -384,9 +384,12 @@ async function convertLongMP3(startedAt, W, H){
     for(let i=0;i<totalFrames && !encodeError;i++){
       const frame=new VideoFrame(bitmap, {timestamp: i*frameDurationUs, displayWidth: W, displayHeight: H});
       videoEncoder.encode(frame, {keyFrame: i===0});
+      // WebMはできたのにMP4だけ真っ黒になる原因として、フレームを
+      // 閉じるのが早すぎてエンコーダーが画像を読み取る前に消えて
+      // しまう疑いがある。キューが空になるまで待ってから閉じる。
+      while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
       frame.close();
       progressEl.value=40+Math.round(i/totalFrames*55);
-      if(videoEncoder.encodeQueueSize>10) await new Promise(r=>setTimeout(r,5));
     }
     if(encodeError) throw encodeError;
     await videoEncoder.flush();
@@ -552,11 +555,11 @@ makeBtn.addEventListener("click", async ()=>{
     for(let i=0; i<totalFrames && !encodeError; i++){
       const frame = new VideoFrame(canvas, {timestamp: i*frameDurationUs});
       videoEncoder.encode(frame, {keyFrame: i===0});
+      // フレームを閉じるのが早すぎるとエンコーダーが黒い画像を
+      // 読み取ることがあるため、キューが空になるまで待ってから閉じる。
+      while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
       frame.close();
       progressEl.value = 40 + Math.round(i/totalFrames*55);
-      if(videoEncoder.encodeQueueSize > 10){
-        await new Promise(r=>setTimeout(r, 5));
-      }
     }
     await videoEncoder.flush();
     if(encodeError) throw encodeError;
