@@ -369,7 +369,15 @@ async function convertLongMP3(startedAt, W, H){
     // 映像エンコードの直前に画像を描き直す。
     drawFrame();
     log("画像をキャンバスに描き直しました。");
+    // 診断：キャンバス自体に画像が描けているか、中心のピクセル色で確認する
+    try{
+      const ctx2=canvas.getContext("2d");
+      const px=ctx2.getImageData(Math.floor(canvas.width/2), Math.floor(canvas.height/2), 1, 1).data;
+      log("診断：img="+(img?("読込済み "+img.naturalWidth+"x"+img.naturalHeight+" complete="+img.complete):"なし")+" / キャンバス中心の色 RGB("+px[0]+","+px[1]+","+px[2]+")");
+    }catch(e){ log("診断：ピクセル確認できませんでした（"+e.message+"）"); }
     for(let i=0;i<totalFrames && !encodeError;i++){
+      // 映像エンコード中にキャンバスが消える場合に備え、定期的に描き直す
+      if(i>0 && i%100===0) drawFrame();
       const frame=new VideoFrame(canvas, {timestamp: i*frameDurationUs});
       videoEncoder.encode(frame, {keyFrame: i===0});
       frame.close();
