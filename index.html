@@ -364,6 +364,11 @@ async function convertLongMP3(startedAt, W, H){
     await audioEncoder.flush();
     if(encodeError) throw encodeError;
     log("音声エンコード完了。映像をエンコードしています…");
+    // 長時間モードでは、音声デコードに時間がかかる間にキャンバスの
+    // 中身が消えることがある（数日開きっぱなしのタブで発生）。
+    // 映像エンコードの直前に画像を描き直す。
+    drawFrame();
+    log("画像をキャンバスに描き直しました。");
     for(let i=0;i<totalFrames && !encodeError;i++){
       const frame=new VideoFrame(canvas, {timestamp: i*frameDurationUs});
       videoEncoder.encode(frame, {keyFrame: i===0});
@@ -529,6 +534,8 @@ makeBtn.addEventListener("click", async ()=>{
     log("音声エンコード完了。");
 
     // 画像を 10fps でエンコード（同じ静止画を繰り返す）
+    // 音声エンコードの間にキャンバスが消えることがあるため、直前に描き直す。
+    drawFrame();
     for(let i=0; i<totalFrames && !encodeError; i++){
       const frame = new VideoFrame(canvas, {timestamp: i*frameDurationUs});
       videoEncoder.encode(frame, {keyFrame: i===0});
