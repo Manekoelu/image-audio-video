@@ -375,10 +375,14 @@ async function convertLongMP3(startedAt, W, H){
       const px=ctx2.getImageData(Math.floor(canvas.width/2), Math.floor(canvas.height/2), 1, 1).data;
       log("診断：img="+(img?("読込済み "+img.naturalWidth+"x"+img.naturalHeight+" complete="+img.complete):"なし")+" / キャンバス中心の色 RGB("+px[0]+","+px[1]+","+px[2]+")");
     }catch(e){ log("診断：ピクセル確認できませんでした（"+e.message+"）"); }
+    // 診断でキャンバス自体は正しい（中心が白っぽい）ことが分かったので、
+    // 問題は VideoFrame(canvas) が隠れたキャンバスから黒い画像を
+    // 取り込む側にある。キャンバスからビットマップのスナップショットを
+    // 作り、そこから VideoFrame を作る。
+    const bitmap=await createImageBitmap(canvas);
+    log("映像用のビットマップを作成しました。");
     for(let i=0;i<totalFrames && !encodeError;i++){
-      // 映像エンコード中にキャンバスが消える場合に備え、定期的に描き直す
-      if(i>0 && i%100===0) drawFrame();
-      const frame=new VideoFrame(canvas, {timestamp: i*frameDurationUs});
+      const frame=new VideoFrame(bitmap, {timestamp: i*frameDurationUs, displayWidth: W, displayHeight: H});
       videoEncoder.encode(frame, {keyFrame: i===0});
       frame.close();
       progressEl.value=40+Math.round(i/totalFrames*55);
@@ -386,6 +390,7 @@ async function convertLongMP3(startedAt, W, H){
     }
     if(encodeError) throw encodeError;
     await videoEncoder.flush();
+    bitmap.close();
     muxer.finalize();
     const out=muxer.target.buffer;
     if(!out || !out.byteLength) throw new Error("出力ファイルが空でした。");
