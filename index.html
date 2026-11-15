@@ -323,7 +323,7 @@ async function convertLongMP3(startedAt, W, H){
   let encodeError=null;
   let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="", videoMuxOk=0, videoMuxError="";
   const videoEncoder=new VideoEncoder({
-    output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ muxer.addVideoChunk(chunk, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
+    output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
     error: (e)=>{ encodeError=e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
   videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: fps, hardwareAcceleration: "prefer-software"});
@@ -510,7 +510,7 @@ makeBtn.addEventListener("click", async ()=>{
 
     let videoChunkCount=0, videoChunkBytes=0, firstVideoChunkBytes=0, firstVideoChunkType="", videoMuxOk=0, videoMuxError="";
     videoEncoder = new VideoEncoder({
-      output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ muxer.addVideoChunk(chunk, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
+      output: (chunk, meta)=>{ videoChunkCount++; videoChunkBytes+=chunk.byteLength; if(videoChunkCount===1){ firstVideoChunkBytes=chunk.byteLength; firstVideoChunkType=chunk.type; const dc=meta&&meta.decoderConfig; log("診断：最初の映像チャンク meta="+(dc?("decoderConfigあり codec="+dc.codec+" description="+(dc.description?dc.description.byteLength+"バイト":"なし")):"decoderConfigなし")+" duration="+chunk.duration+" timestamp="+chunk.timestamp); } try{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); videoMuxOk++; }catch(e){ if(!videoMuxError) videoMuxError=e.message; } },
       error: (e)=>{ encodeError = e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
     videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: FPS, hardwareAcceleration: "prefer-software"});
