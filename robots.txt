@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://manekoelu.github.io/image-audio-video/sitemap.xml
