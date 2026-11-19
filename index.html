@@ -325,7 +325,7 @@ async function convertLongMP3(startedAt, W, H){
     output: (chunk, meta)=>{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); },
     error: (e)=>{ encodeError=e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
-  videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: fps, hardwareAcceleration: "prefer-software"});
+  videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, bitrateMode: "variable", framerate: fps, hardwareAcceleration: "prefer-software"});
   let decodedCount=0, encodedAudioCount=0;
   const audioEncoder=new AudioEncoder({
     output: (chunk, meta)=>{ encodedAudioCount++; muxer.addAudioChunk(chunk, meta); },
@@ -498,7 +498,7 @@ makeBtn.addEventListener("click", async ()=>{
       output: (chunk, meta)=>{ const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data); muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, frameDurationUs, meta); },
       error: (e)=>{ encodeError = e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
-    videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, framerate: FPS, hardwareAcceleration: "prefer-software"});
+    videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, bitrateMode: "variable", framerate: FPS, hardwareAcceleration: "prefer-software"});
     log("映像エンコーダー設定完了："+videoCodec+"、"+W+"×"+H+"、"+totalFrames+"フレーム。");
 
     audioEncoder = new AudioEncoder({
