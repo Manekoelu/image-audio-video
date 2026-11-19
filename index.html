@@ -41,14 +41,14 @@
 </ol>
 <p class="small">アカウント登録やインストールは不要です。このページを開くだけで使えます。</p>
 <div class="privacy"><strong>プライバシーについて：ファイルはアップロードされません。</strong><br>
-変換はすべてお使いのブラウザの中で行います。画像や音声がサーバーに送られることはありません。タブを閉じれば、選んだファイルはブラウザから消えます。MP4の作成には、Chrome / Edge に内蔵の WebCodecs（ブラウザ標準のエンコーダー）と、mp4-muxer という小さなプログラム（インターネットから読み込み）を使います。初回の読み込みだけインターネット接続が必要です。このページは GitHub Pages で公開されています。ページを開くときに GitHub のサーバーにアクセスしますが、選んだ画像・音声が送られることはありません。</div>
+変換はすべてお使いのブラウザの中で行います。画像や音声がサーバーに送られることはありません。タブを閉じれば、選んだファイルはブラウザから消えます。MP4の作成には、Chrome / Edge に内蔵の WebCodecs（ブラウザ標準のエンコーダー）と、mp4-muxer / Mediabunny という小さなプログラム（インターネットから読み込み）を使います。MP3の音声は再エンコードせず、そのままMP4に入ります。初回の読み込みだけインターネット接続が必要です。このページは GitHub Pages で公開されています。ページを開くときに GitHub のサーバーにアクセスしますが、選んだ画像・音声が送られることはありません。</div>
 
 <div class="box">
   <h2>対応形式</h2>
   <ul>
     <li><strong>画像：</strong>JPG / PNG / WebP</li>
     <li><strong>音声：</strong>MP3 / WAV / M4A / OGG / FLAC（96kHz など高いサンプルレートの音声も、自動で 48kHz に変換します）</li>
-    <li><strong>出力：</strong>MP4（H.264 + AAC）、10fps</li>
+    <li><strong>出力：</strong>MP4（H.264 + 音声）、10fps。MP3の音声は再エンコードせずそのまま入ります（音質そのまま・容量も元のまま）。MP3以外は AAC に変換します</li>
     <li><strong>動画サイズ：</strong>画像と同じ縦横比。解像度は元のサイズ / 長い辺 2160px / 1920px / 1280px / 720px から選べます</li>
     <li><strong>対応ブラウザ：</strong>Chrome / Edge（MP4作成には WebCodecs が必要です）</li>
   </ul>
@@ -84,7 +84,7 @@
   <p><a id="downloadLink" href="#" download="movie.mp4" hidden>⬇ 完成した動画をダウンロード（.mp4）</a></p>
   <p><video id="resultPreview" controls preload="metadata" hidden style="max-width:100%;background:#000"></video></p>
   <p><button id="previewStopBtn" type="button" hidden>⏹ プレビューを停止</button></p>
-  <p class="small">出力は最初から MP4（H.264 + AAC）です。静止画なので 10fps で作ります（動きはありませんが、YouTube / X / Instagram / TikTok に投稿できます）。完成した動画のファイル名は、選んだ音声ファイルと同じ名前になります（例：音声が sample.mp3 なら sample.mp4）。</p>
+  <p class="small">出力は MP4（H.264 + 音声）です。MP3音声は再エンコードせずそのまま入ります。静止画なので 10fps で作ります（動きはありませんが、YouTube / X / Instagram / TikTok に投稿できます）。完成した動画のファイル名は、選んだ音声ファイルと同じ名前になります（例：音声が sample.mp3 なら sample.mp4）。</p>
 </div>
 
 <div class="box">
@@ -163,6 +163,26 @@ async function ensureMuxer(){
     try{ await loadScript(u); if(window.Mp4Muxer && window.Mp4Muxer.Muxer) return true; }catch(e){}
   }
   return false;
+}
+/* MP3パススルー用の Mediabunny（mp4-muxer の後継。MP4 への MP3 格納に対応）。
+   ESM ビルドしかないので、動的 import() で読み込む。読み込めたらモジュールを返す。
+   読めなければ null を返し、呼び出し元は AAC パスにフォールバックする。 */
+let MediabunnyLib=null;
+async function ensureMediabunny(){
+  if(MediabunnyLib) return MediabunnyLib;
+  const urls=[
+    "https://cdn.jsdelivr.net/npm/mediabunny@1.66.1/dist/bundles/mediabunny.mjs",
+    "https://unpkg.com/mediabunny@1.66.1/dist/bundles/mediabunny.mjs"
+  ];
+  for(const u of urls){
+    try{
+      const m=await import(u);
+      if(m && m.Output && m.Mp4OutputFormat && m.EncodedAudioPacketSource && m.EncodedVideoPacketSource && m.EncodedPacket){
+        MediabunnyLib=m; return m;
+      }
+    }catch(e){ log("Mediabunny の読み込みに失敗しました："+u); }
+  }
+  return null;
 }
 (function checkSupport(){
   const ok = ("VideoEncoder" in window) && ("AudioEncoder" in window) && ("VideoFrame" in window) && ("AudioData" in window);
@@ -266,7 +286,7 @@ function splitMP3Frames(bytes){
     const coeff=version===3?144:72;
     const len=Math.floor(coeff*bitrate*1000/sampleRate)+padding;
     if(len<4 || offset+len>u8.length) break;
-    frames.push({offset: offset, length: len, timestampUs: timestampUs, samples: samples});
+    frames.push({offset: offset, length: len, timestampUs: timestampUs, samples: samples, sampleRate: sampleRate});
     timestampUs+=Math.round(samples/sampleRate*1000000);
     offset+=len;
   }
@@ -284,12 +304,15 @@ function outputFileName(ext){
 }
 function audioTargetBitrate(){
   // 元の音声ファイルの平均ビットレートを AAC の目標値として使う。
-  // 192kbps を超える音声（WAV や高ビットレートの AAC 等）は 192kbps に抑える。
+  // Chrome の AAC エンコーダーは 96000 / 128000 / 160000 / 192000 の
+  // 4段階しか受け付けないので、元のビットレート以上のいちばん近い値に切り上げる。
   // 元の音声が小さいほど完成動画も小さくなる。AAC は MP3 より効率が良いので、
   // 同じビットレートでも音質は元の MP3 と同等以上になる。
   if(!audioFile || !audioDuration || audioDuration<=0) return 192000;
   const src=Math.round(audioFile.size*8/audioDuration);
-  return Math.max(32000, Math.min(192000, src));
+  const supported=[96000,128000,160000,192000];
+  for(const v of supported){ if(src<=v) return v; }
+  return 192000;
 }
 function getFPSForDuration(duration){
   if(duration>1800) return 1;
@@ -408,6 +431,118 @@ async function convertLongMP3(startedAt, W, H){
     try{ if(audioEncoder.state!=="closed") audioEncoder.close(); }catch(e){}
   }
 }
+/* MP3パススルー：元のMP3音声を再エンコードせず、そのままMP4に入れる。
+   Mediabunny を使い、映像は従来通り WebCodecs の H.264（VBR）で作る。
+   音声は MP3 のままなので音質は100%、容量も元のMP3とほぼ同じになる。
+   失敗した場合は例外を投げ、呼び出し元が AAC パスにフォールバックする。 */
+async function convertMP3Passthrough(startedAt, W, H, bytes, info, frames){
+  const mb = MediabunnyLib;
+  const sampleRate=info.sampleRate, channels=info.channels;
+  const duration=audioDuration;
+  const longMode = duration>600;
+  const fps = longMode ? getFPSForDuration(duration) : FPS;
+  const totalFrames=Math.max(1, Math.ceil(duration*fps));
+  const frameDurationUs=Math.round(1000000/fps);
+  log("MP3パススルー：音声を再エンコードせず、そのままMP4に入れます（"+sampleRate+"Hz、"+channels+"ch、長さ "+duration.toFixed(1)+" 秒、映像 "+fps+"fps、"+totalFrames+"フレーム）。");
+  const output=new mb.Output({
+    format: new mb.Mp4OutputFormat({fastStart: "in-memory"}),
+    target: new mb.BufferTarget(),
+  });
+  const videoSource=new mb.EncodedVideoPacketSource("avc");
+  const audioSource=new mb.EncodedAudioPacketSource("mp3");
+  output.addVideoTrack(videoSource, {frameRate: fps});
+  output.addAudioTrack(audioSource);
+  await output.start();
+  // H.264 コーデックを選ぶ（対応しているものから順に試す）
+  const codecs=["avc1.640028","avc1.64001f","avc1.4d001f","avc1.42001f"];
+  let videoCodec=null;
+  for(const c of codecs){
+    try{
+      const sup=await VideoEncoder.isConfigSupported({codec:c, width:W, height:H, bitrate:2500000, framerate:fps});
+      if(sup && sup.supported){ videoCodec=c; break; }
+    }catch(e){}
+  }
+  if(!videoCodec) throw new Error("このブラウザで使える H.264 エンコーダーが見つかりませんでした。");
+  let encodeError=null, videoAddError=null;
+  const pendingVideoAdds=[];
+  let firstVideoPacket=true;
+  const videoEncoder=new VideoEncoder({
+    output: (chunk, meta)=>{
+      try{
+        const data=new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+        // EncodedVideoChunk.duration が null になることがある（黒動画バグの原因）。
+        // mp4-muxer の時と同じく、フレーム長を明示して渡す。
+        const packet=new mb.EncodedPacket(data, chunk.type, chunk.timestamp/1000000, frameDurationUs/1000000);
+        if(firstVideoPacket && (!meta || !meta.decoderConfig)) log("警告：映像の decoderConfig が取得できませんでした。");
+        const pr=videoSource.add(packet, firstVideoPacket ? {decoderConfig: meta && meta.decoderConfig} : undefined);
+        firstVideoPacket=false;
+        pendingVideoAdds.push(pr);
+        pr.catch(e=>{ videoAddError=e; });
+      }catch(e){ encodeError=e; }
+    },
+    error: (e)=>{ encodeError=e; log("映像エンコーダーのエラー："+(e && e.message ? e.message : e)); }
+  });
+  try{
+    videoEncoder.configure({codec: videoCodec, width: W, height: H, bitrate: 2500000, bitrateMode: "variable", framerate: fps, hardwareAcceleration: "prefer-software"});
+    log("映像エンコーダー設定完了："+videoCodec+"、"+W+"×"+H+"、"+totalFrames+"フレーム。");
+    // MP3フレームをそのまま入れる（デコードも再エンコードもしない）
+    let firstAudioPacket=true;
+    for(let fi=0; fi<frames.length; fi++){
+      const f=frames[fi];
+      const packet=new mb.EncodedPacket(new Uint8Array(bytes, f.offset, f.length), "key", f.timestampUs/1000000, f.samples/f.sampleRate);
+      await audioSource.add(packet, firstAudioPacket ? {decoderConfig: {codec: "mp3", numberOfChannels: channels, sampleRate: sampleRate}} : undefined);
+      firstAudioPacket=false;
+      if(fi%1000===0) progressEl.value=Math.min(35, Math.round(fi/frames.length*35));
+      if(fi>0 && fi%20000===0) log("音声パススルー中："+fi+" / "+frames.length+" フレーム");
+    }
+    log("音声パススルー完了："+frames.length+" フレーム。映像をエンコードしています…");
+    // 長時間モードでは、音声処理に時間がかかる間にキャンバスの
+    // 中身が消えることがあるため、映像エンコードの直前に画像を描き直す。
+    drawFrame();
+    if(longMode){
+      // キャンバスからビットマップのスナップショットを作り、そこから VideoFrame を作る。
+      const bitmap=await createImageBitmap(canvas);
+      for(let i=0;i<totalFrames && !encodeError;i++){
+        const frame=new VideoFrame(bitmap, {timestamp: i*frameDurationUs, displayWidth: W, displayHeight: H});
+        videoEncoder.encode(frame, {keyFrame: i===0});
+        // エンコーダーがフレームを処理し終わるまで待ってから閉じる。
+        while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
+        frame.close();
+        progressEl.value=40+Math.round(i/totalFrames*55);
+      }
+      if(encodeError) throw encodeError;
+      await videoEncoder.flush();
+      bitmap.close();
+    }else{
+      for(let i=0; i<totalFrames && !encodeError; i++){
+        const frame = new VideoFrame(canvas, {timestamp: i*frameDurationUs});
+        videoEncoder.encode(frame, {keyFrame: i===0});
+        // エンコーダーがフレームを処理し終わるまで待ってから閉じる。
+        while(videoEncoder.encodeQueueSize>0 && !encodeError) await new Promise(r=>setTimeout(r,5));
+        frame.close();
+        progressEl.value = 40 + Math.round(i/totalFrames*55);
+      }
+      if(encodeError) throw encodeError;
+      await videoEncoder.flush();
+    }
+    if(videoAddError) throw videoAddError;
+    await Promise.all(pendingVideoAdds);
+    log("映像エンコード完了。MP4にまとめています…");
+    await output.finalize();
+    const out=output.target.buffer;
+    if(!out || !out.byteLength) throw new Error("出力ファイルが空でした。");
+    const blob=new Blob([out],{type:"video/mp4"});
+    const url=URL.createObjectURL(blob);
+    downloadLink.href=url; downloadLink.hidden=false; downloadLink.download=outputFileName(".mp4");
+    resultPreview.src=url; resultPreview.hidden=false; previewStopBtn.hidden=false;
+    const sec=((Date.now()-startedAt)/1000).toFixed(1);
+    setStatus("完成しました（"+sec+" 秒）。上のプレビューで確認して、ダウンロードリンクから保存してください。\nサイズ："+(blob.size/1024/1024).toFixed(2)+" MB");
+    log("完成しました（"+sec+" 秒）。ダウンロードリンクが出ています。");
+    progressEl.value=100;
+  }finally{
+    try{ if(videoEncoder.state!=="closed") videoEncoder.close(); }catch(e){}
+  }
+}
 function drawFrame(){
   const ctx=canvas.getContext("2d");
   const W=canvas.width, H=canvas.height;
@@ -436,9 +571,6 @@ makeBtn.addEventListener("click", async ()=>{
     if(!("VideoEncoder" in window) || !("AudioEncoder" in window))
       throw new Error("このブラウザは WebCodecs に対応していません。Chrome / Edge で開いてください。");
     setStatus("MP4の部品を読み込んでいます…");
-    const muxOk = await ensureMuxer();
-    if(!muxOk) throw new Error("mp4-muxer を読み込めませんでした。インターネットに接続した状態で、ページを再読み込みしてください。");
-    log("mp4-muxer の読み込み完了。");
 
     let [W,H,scaled]=calcSize();
     // H.264 は幅・高さが偶数である必要があります
@@ -447,9 +579,38 @@ makeBtn.addEventListener("click", async ()=>{
     drawFrame();
     log("動画サイズ："+W+"×"+H+"（画像 "+img.naturalWidth+"×"+img.naturalHeight+"、縦横比は画像のまま）");
 
+    // MP3はまずパススルー（再エンコードなし）を試す。
+    // Mediabunny が読めない／フレームが読めない／途中で失敗した場合は、
+    // 下の AAC パス（従来通り）に進む。
+    const isMP3File = audioFile.name.toLowerCase().endsWith(".mp3");
+    if(isMP3File){
+      try{
+        const mp3Bytes = await audioFile.arrayBuffer();
+        const mp3Info = parseMP3Info(mp3Bytes);
+        const mp3Frames = mp3Info ? splitMP3Frames(mp3Bytes) : [];
+        if(mp3Info && mp3Frames.length){
+          const mb = await ensureMediabunny();
+          if(mb){
+            await convertMP3Passthrough(startedAt, W, H, mp3Bytes, mp3Info, mp3Frames);
+            return;
+          }
+          log("Mediabunny を読み込めなかったため、AAC に変換し直します。");
+        }else{
+          log("MP3フレームを読み取れなかったため、AAC に変換します。");
+        }
+      }catch(e){
+        log("MP3パススルーに失敗しました（"+(e && e.message ? e.message : e)+"）。AAC に変換し直します。");
+        console.error(e);
+      }
+    }
+
+    const muxOk = await ensureMuxer();
+    if(!muxOk) throw new Error("mp4-muxer を読み込めませんでした。インターネットに接続した状態で、ページを再読み込みしてください。");
+    log("mp4-muxer の読み込み完了。");
+
     // 長い音声（10分超）は decodeAudioData ではメモリが足りず失敗するため、
     // MP3ならストリーミング方式で変換する
-    if(audioDuration>600 && audioFile.name.toLowerCase().endsWith(".mp3")){
+    if(audioDuration>600 && isMP3File){
       await convertLongMP3(startedAt, W, H);
       return;
     }
