@@ -331,7 +331,7 @@ async function convertLongMP3(startedAt, W, H){
     output: (chunk, meta)=>{ encodedAudioCount++; muxer.addAudioChunk(chunk, meta); },
     error: (e)=>{ encodeError=e; log("音声エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
-  audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000});
+  audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000, bitrateMode: "variable"});
   try{
     const decoder=new AudioDecoder({
       output: (audioData)=>{
@@ -505,7 +505,7 @@ makeBtn.addEventListener("click", async ()=>{
       output: (chunk, meta)=>{ muxer.addAudioChunk(chunk, meta); },
       error: (e)=>{ encodeError = e; log("音声エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
-    audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000});
+    audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000, bitrateMode: "variable"});
 
     setStatus("MP4 に変換しています…");
     log("音声・映像のエンコードを開始しました。");
