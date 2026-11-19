@@ -282,6 +282,15 @@ function outputFileName(ext){
   }
   return base+ext;
 }
+function audioTargetBitrate(){
+  // 元の音声ファイルの平均ビットレートを AAC の目標値として使う。
+  // 192kbps を超える音声（WAV や高ビットレートの AAC 等）は 192kbps に抑える。
+  // 元の音声が小さいほど完成動画も小さくなる。AAC は MP3 より効率が良いので、
+  // 同じビットレートでも音質は元の MP3 と同等以上になる。
+  if(!audioFile || !audioDuration || audioDuration<=0) return 192000;
+  const src=Math.round(audioFile.size*8/audioDuration);
+  return Math.max(32000, Math.min(192000, src));
+}
 function getFPSForDuration(duration){
   if(duration>1800) return 1;
   if(duration>600) return 2;
@@ -305,6 +314,7 @@ async function convertLongMP3(startedAt, W, H){
   const totalFrames=Math.max(1, Math.ceil(duration*fps));
   const frameDurationUs=Math.round(1000000/fps);
   log("長時間モード：MP3をストリーミングで変換します（"+sampleRate+"Hz、"+channels+"ch、長さ "+duration.toFixed(1)+" 秒、映像 "+fps+"fps、"+totalFrames+"フレーム）。");
+  log("音声の目標ビットレート："+Math.round(audioTargetBitrate()/1000)+"kbps（元の音声ファイルの平均ビットレートを使用）。");
   const muxer=new Mp4Muxer.Muxer({
     target: new Mp4Muxer.ArrayBufferTarget(),
     video: { codec: "avc", width: W, height: H },
@@ -331,7 +341,7 @@ async function convertLongMP3(startedAt, W, H){
     output: (chunk, meta)=>{ encodedAudioCount++; muxer.addAudioChunk(chunk, meta); },
     error: (e)=>{ encodeError=e; log("音声エンコーダーのエラー："+(e && e.message ? e.message : e)); }
   });
-  audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000, bitrateMode: "variable"});
+  audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: audioTargetBitrate(), bitrateMode: "variable"});
   try{
     const decoder=new AudioDecoder({
       output: (audioData)=>{
@@ -473,6 +483,7 @@ makeBtn.addEventListener("click", async ()=>{
     const channels = Math.min(2, audioBuffer.numberOfChannels);
     const duration = audioBuffer.duration;
     log("音声デコード完了：長さ "+duration.toFixed(1)+" 秒、"+sampleRate+"Hz、"+channels+"ch。");
+    log("音声の目標ビットレート："+Math.round(audioTargetBitrate()/1000)+"kbps（元の音声ファイルの平均ビットレートを使用）。");
     const totalFrames = Math.max(1, Math.ceil(duration * FPS));
     const frameDurationUs = Math.round(1000000 / FPS);
 
@@ -505,7 +516,7 @@ makeBtn.addEventListener("click", async ()=>{
       output: (chunk, meta)=>{ muxer.addAudioChunk(chunk, meta); },
       error: (e)=>{ encodeError = e; log("音声エンコーダーのエラー："+(e && e.message ? e.message : e)); }
     });
-    audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: 192000, bitrateMode: "variable"});
+    audioEncoder.configure({codec: "mp4a.40.2", numberOfChannels: channels, sampleRate: sampleRate, bitrate: audioTargetBitrate(), bitrateMode: "variable"});
 
     setStatus("MP4 に変換しています…");
     log("音声・映像のエンコードを開始しました。");
